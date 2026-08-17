@@ -25,10 +25,11 @@ jobs:
           flutter-version: '3.22.x'
           channel: 'stable'
 
-      - name: Criar projeto Flutter base
+      - name: Criar projeto Flutter base com suporte a Português e Sobreposição
         run: |
           flutter create --org com.pauloluna --project-name paulo_luna .
-          flutter pub add shared_preferences flutter_overlay_window
+          flutter pub add shared_preferences flutter_overlay_window intl
+          flutter pub add flutter_localizations --sdk=flutter
 
       - name: Configurar Permissão Overlay no AndroidManifest
         run: |
