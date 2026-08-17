@@ -25,15 +25,28 @@ jobs:
           flutter-version: '3.22.x'
           channel: 'stable'
 
-      - name: Criar projeto Flutter base com suporte a Português e Sobreposição
+      - name: Criar projeto Flutter base
         run: |
           flutter create --org com.pauloluna --project-name paulo_luna .
-          flutter pub add shared_preferences flutter_overlay_window intl
-          flutter pub add flutter_localizations --sdk=flutter
+          flutter pub add shared_preferences flutter_overlay_window
 
-      - name: Configurar Permissão Overlay no AndroidManifest
+      - name: Configurar Permissões no AndroidManifest
         run: |
-          sed -i '/<application/i <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>\n<uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>' android/app/src/main/AndroidManifest.xml
+          python3 -c "
+          manifest = 'android/app/src/main/AndroidManifest.xml'
+          with open(manifest, 'r') as f:
+              content = f.read()
+          perms = '''
+              <uses-permission android:name=\"android.permission.SYSTEM_ALERT_WINDOW\"/>
+              <uses-permission android:name=\"android.permission.FOREGROUND_SERVICE\"/>
+              <uses-permission android:name=\"android.permission.FOREGROUND_SERVICE_SPECIAL_USE\"/>
+              <uses-permission android:name=\"android.permission.WAKE_LOCK\"/>
+          '''
+          if 'SYSTEM_ALERT_WINDOW' not in content:
+              content = content.replace('<application', perms + '\n    <application')
+              with open(manifest, 'w') as f:
+                  f.write(content)
+          "
 
       - name: Compilar APK Release
         run: flutter build apk --release
