@@ -1,9 +1,20 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() => runApp(const DriverApp());
+
+// Janela Flutuante Nativa sobre outros apps (Uber, 99, etc.)
+@pragma("vm:entry-point")
+void overlayMain() {
+  runApp(const MaterialApp(
+    debugShowCheckedModeBanner: false,
+    home: OverlayWidget(),
+  ));
+}
 
 class Shift {
   String id;
@@ -66,6 +77,13 @@ class _DriverAppState extends State<DriverApp> {
     return MaterialApp(
       title: 'Paulo Luna',
       debugShowCheckedModeBanner: false,
+      locale: const Locale('pt', 'BR'),
+      supportedLocales: const [Locale('pt', 'BR')],
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
       themeMode: _themeMode,
       theme: ThemeData(
         brightness: Brightness.light,
@@ -121,14 +139,16 @@ class DriverHomePage extends StatefulWidget {
   State<DriverHomePage> createState() => _DriverHomePageState();
 }
 
-class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProviderStateMixin {
+class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late TabController _tabs;
   Timer? _timer;
   int _seconds = 0;
   bool _running = false;
   List<Shift> _shifts = [];
 
-  Offset _floatingButtonOffset = const Offset(20, 100);
+  // Posição magnética do balão interno
+  double _pillY = 120;
+  bool _pillOnRight = true;
 
   DateTimeRange _selectedRange = DateTimeRange(
     start: DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day),
@@ -136,11 +156,79 @@ class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProvid
   );
   String _filterLabel = 'Hoje';
 
+  static const List<String> _meses = [
+    '', 'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+    'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+  ];
+
+  static const List<String> _mesesAbbr = [
+    '', 'jan', 'fev', 'mar', 'abr', 'mai', 'jun',
+    'jul', 'ago', 'set', 'out', 'nov', 'dez'
+  ];
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _tabs = TabController(length: 2, vsync: this);
     _loadData();
+    _checkAndRequestOverlayPermission();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  Future<void> _checkAndRequestOverlayPermission() async {
+    try {
+      bool isGranted = await FlutterOverlayWindow.isPermissionGranted();
+      if (!isGranted) {
+        await FlutterOverlayWindow.requestPermission();
+      }
+    } catch (_) {}
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (_running) {
+      if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+        _showNativeOverlay();
+      } else if (state == AppLifecycleState.resumed) {
+        _closeNativeOverlay();
+      }
+    }
+  }
+
+  Future<void> _showNativeOverlay() async {
+    try {
+      bool isGranted = await FlutterOverlayWindow.isPermissionGranted();
+      if (!isGranted) {
+        await FlutterOverlayWindow.requestPermission();
+        return;
+      }
+      if (await FlutterOverlayWindow.isActive()) return;
+      await FlutterOverlayWindow.showOverlay(
+        enableDrag: true,
+        overlayTitle: "Paulo Luna - Em Rota",
+        overlayContent: "Toque para abrir",
+        flag: OverlayFlag.defaultFlag,
+        alignment: OverlayAlignment.centerRight,
+        visibility: NotificationVisibility.visibilityPublic,
+        positionGravity: PositionGravity.auto,
+        height: 180,
+        width: 180,
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _closeNativeOverlay() async {
+    try {
+      if (await FlutterOverlayWindow.isActive()) {
+        await FlutterOverlayWindow.closeOverlay();
+      }
+    } catch (_) {}
   }
 
   Future<void> _loadData() async {
@@ -161,7 +249,8 @@ class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProvid
     await prefs.setString('shifts_data', encoded);
   }
 
-  void _start() {
+  void _start() async {
+    await _checkAndRequestOverlayPermission();
     _timer = Timer.periodic(const Duration(seconds: 1), (t) {
       setState(() => _seconds++);
     });
@@ -171,6 +260,7 @@ class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProvid
   void _pause() {
     _timer?.cancel();
     setState(() => _running = false);
+    _closeNativeOverlay();
   }
 
   void _reset() {
@@ -179,6 +269,7 @@ class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProvid
       _seconds = 0;
       _running = false;
     });
+    _closeNativeOverlay();
   }
 
   String _formatTime(int s) {
@@ -188,13 +279,13 @@ class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProvid
     return '$h:$m:$sec';
   }
 
-  String _formatDate(DateTime dt) {
+  String _formatDatePt(DateTime dt) {
     final d = dt.day.toString().padLeft(2, '0');
-    final m = dt.month.toString().padLeft(2, '0');
+    final m = _mesesAbbr[dt.month];
     final y = dt.year.toString();
     final h = dt.hour.toString().padLeft(2, '0');
     final min = dt.minute.toString().padLeft(2, '0');
-    return '$d/$m/$y - $h:$min';
+    return '$d de $m de $y às $h:$min';
   }
 
   void _openFinishModal() {
@@ -297,7 +388,7 @@ class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProvid
               children: [
                 ListTile(
                   contentPadding: EdgeInsets.zero,
-                  title: Text('Data: ${_formatDate(selectedDate)}'),
+                  title: Text('Data: ${_formatDatePt(selectedDate)}'),
                   trailing: const Icon(Icons.calendar_month),
                   onTap: () async {
                     final pickedDate = await showDatePicker(
@@ -305,6 +396,7 @@ class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProvid
                       initialDate: selectedDate,
                       firstDate: DateTime(2020),
                       lastDate: DateTime.now(),
+                      locale: const Locale('pt', 'BR'),
                     );
                     if (pickedDate != null) {
                       final pickedTime = await showTimePicker(
@@ -441,6 +533,7 @@ class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProvid
     );
   }
 
+  // Seletor de Período estilo BottomSheet totalmente traduzido
   void _openDateFilterBottomSheet() {
     showModalBottomSheet(
       context: context,
@@ -501,12 +594,12 @@ class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProvid
                         }),
                         _shortcutChip('Este mês', () {
                           final start = DateTime(now.year, now.month, 1);
-                          applyShortcut('Este mês', start, now);
+                          applyShortcut('${_meses[now.month]} de ${now.year}', start, now);
                         }),
                         _shortcutChip('Mês passado', () {
                           final prevMonth = DateTime(now.year, now.month - 1, 1);
                           final lastDay = DateTime(now.year, now.month, 0);
-                          applyShortcut('Mês passado', prevMonth, lastDay);
+                          applyShortcut('${_meses[prevMonth.month]} de ${prevMonth.year}', prevMonth, lastDay);
                         }),
                       ],
                     ),
@@ -516,9 +609,9 @@ class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProvid
                   const SizedBox(height: 10),
                   ListTile(
                     leading: const Icon(Icons.date_range, color: Color(0xFF00C853)),
-                    title: const Text('Escolher Intervalo Personalizado'),
+                    title: const Text('Escolher Intervalo no Calendário'),
                     subtitle: Text(
-                      '${_selectedRange.start.day}/${_selectedRange.start.month} até ${_selectedRange.end.day}/${_selectedRange.end.month}/${_selectedRange.end.year}',
+                      '${_selectedRange.start.day} de ${_mesesAbbr[_selectedRange.start.month]} até ${_selectedRange.end.day} de ${_mesesAbbr[_selectedRange.end.month]} de ${_selectedRange.end.year}',
                     ),
                     trailing: const Icon(Icons.chevron_right),
                     onTap: () async {
@@ -527,6 +620,11 @@ class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProvid
                         initialDateRange: _selectedRange,
                         firstDate: DateTime(2020),
                         lastDate: DateTime.now(),
+                        locale: const Locale('pt', 'BR'),
+                        saveText: 'APLICAR',
+                        helpText: 'SELECIONE O INTERVALO',
+                        fieldStartLabelText: 'Data de início',
+                        fieldEndLabelText: 'Data de término',
                         builder: (context, child) {
                           return Theme(
                             data: Theme.of(context).copyWith(
@@ -540,7 +638,7 @@ class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProvid
                       );
                       if (picked != null) {
                         setState(() {
-                          _filterLabel = 'Personalizado';
+                          _filterLabel = '${picked.start.day}/${_mesesAbbr[picked.start.month]} - ${picked.end.day}/${_mesesAbbr[picked.end.month]}';
                           _selectedRange = DateTimeRange(
                             start: DateTime(picked.start.year, picked.start.month, picked.start.day),
                             end: DateTime(picked.end.year, picked.end.month, picked.end.day, 23, 59, 59),
@@ -632,21 +730,53 @@ class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProvid
             ],
           ),
 
+          // Balão com encaixe magnético nas laterais da tela
           if (_running)
             Positioned(
-              left: _floatingButtonOffset.dx,
-              top: _floatingButtonOffset.dy,
-              child: Draggable(
-                feedback: _buildFloatingPill(isDragging: true),
-                childWhenDragging: Container(),
-                onDragEnd: (dragDetails) {
-                  final adjustedX = dragDetails.offset.dx.clamp(10.0, screenSize.width - 160.0);
-                  final adjustedY = dragDetails.offset.dy.clamp(60.0, screenSize.height - 120.0);
+              left: _pillOnRight ? null : 0,
+              right: _pillOnRight ? 0 : null,
+              top: _pillY,
+              child: GestureDetector(
+                onVerticalDragUpdate: (details) {
                   setState(() {
-                    _floatingButtonOffset = Offset(adjustedX, adjustedY);
+                    _pillY = (_pillY + details.delta.dy).clamp(80.0, screenSize.height - 180.0);
                   });
                 },
-                child: _buildFloatingPill(isDragging: false),
+                onHorizontalDragEnd: (details) {
+                  if (details.primaryVelocity != null) {
+                    if (details.primaryVelocity! > 200) {
+                      setState(() => _pillOnRight = true);
+                    } else if (details.primaryVelocity! < -200) {
+                      setState(() => _pillOnRight = false);
+                    }
+                  }
+                },
+                onTap: () => _tabs.animateTo(0),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.90),
+                    borderRadius: BorderRadius.only(
+                      topLeft: Radius.circular(_pillOnRight ? 24 : 0),
+                      bottomLeft: Radius.circular(_pillOnRight ? 24 : 0),
+                      topRight: Radius.circular(_pillOnRight ? 0 : 24),
+                      bottomRight: Radius.circular(_pillOnRight ? 0 : 24),
+                    ),
+                    border: Border.all(color: const Color(0xFF00E676), width: 2),
+                    boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 10, offset: Offset(0, 4))],
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.fiber_manual_record, color: Color(0xFF00E676), size: 12),
+                      const SizedBox(width: 6),
+                      Text(
+                        'EM ROTA: ${_formatTime(_seconds)}',
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ),
         ],
@@ -660,43 +790,6 @@ class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProvid
               child: const Icon(Icons.add),
             )
           : null,
-    );
-  }
-
-  Widget _buildFloatingPill({required bool isDragging}) {
-    return Material(
-      color: Colors.transparent,
-      child: GestureDetector(
-        onTap: () => _tabs.animateTo(0),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          decoration: BoxDecoration(
-            color: Colors.black.withOpacity(isDragging ? 0.95 : 0.85),
-            borderRadius: BorderRadius.circular(30),
-            border: Border.all(color: const Color(0xFF00E676), width: 2),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black54,
-                blurRadius: isDragging ? 14 : 8,
-                offset: const Offset(0, 4),
-              )
-            ],
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.open_with, color: Colors.grey, size: 14), 
-              const SizedBox(width: 6),
-              const Icon(Icons.fiber_manual_record, color: Color(0xFF00E676), size: 12),
-              const SizedBox(width: 6),
-              Text(
-                _formatTime(_seconds),
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
-              ),
-            ],
-          ),
-        ),
-      ),
     );
   }
 
@@ -847,7 +940,7 @@ class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProvid
                           backgroundColor: Colors.black12,
                           child: Icon(Icons.drive_eta, color: Color(0xFF00C853)),
                         ),
-                        title: Text(_formatDate(item.date), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                        title: Text(_formatDatePt(item.date), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                         subtitle: Text(
                           '${_formatTime(item.duration)} • ${item.km} km • Gas: R\$ ${item.fuel.toStringAsFixed(2)}',
                           style: const TextStyle(fontSize: 12),
@@ -903,6 +996,44 @@ class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProvid
           ],
         )
       ],
+    );
+  }
+}
+
+// Botão Flutuante Nativo para sobrepor outros apps (Uber/99/Waze)
+class OverlayWidget extends StatelessWidget {
+  const OverlayWidget({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: GestureDetector(
+        onTap: () => FlutterOverlayWindow.shareData("open_app"),
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.black.withOpacity(0.92),
+            shape: BoxShape.circle,
+            border: Border.all(color: const Color(0xFF00E676), width: 3),
+            boxShadow: const [
+              BoxShadow(color: Colors.black87, blurRadius: 10, offset: Offset(0, 3)),
+            ],
+          ),
+          child: const Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.timer, color: Color(0xFF00E676), size: 28),
+                SizedBox(height: 2),
+                Text(
+                  "EM ROTA",
+                  style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
