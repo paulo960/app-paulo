@@ -1,13 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() => runApp(const DriverApp());
 
-// Janela Flutuante Nativa sobre outros apps (Uber, 99, etc.)
 @pragma("vm:entry-point")
 void overlayMain() {
   runApp(const MaterialApp(
@@ -77,13 +75,6 @@ class _DriverAppState extends State<DriverApp> {
     return MaterialApp(
       title: 'Paulo Luna',
       debugShowCheckedModeBanner: false,
-      locale: const Locale('pt', 'BR'),
-      supportedLocales: const [Locale('pt', 'BR')],
-      localizationsDelegates: const [
-        GlobalMaterialLocalizations.delegate,
-        GlobalWidgetsLocalizations.delegate,
-        GlobalCupertinoLocalizations.delegate,
-      ],
       themeMode: _themeMode,
       theme: ThemeData(
         brightness: Brightness.light,
@@ -146,9 +137,10 @@ class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProvid
   bool _running = false;
   List<Shift> _shifts = [];
 
-  // Posição magnética do balão interno
-  double _pillY = 120;
-  bool _pillOnRight = true;
+  // Posição magnética fluida do balão
+  double _pillX = 200.0;
+  double _pillY = 150.0;
+  bool _isDragging = false;
 
   DateTimeRange _selectedRange = DateTimeRange(
     start: DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day),
@@ -172,22 +164,12 @@ class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProvid
     WidgetsBinding.instance.addObserver(this);
     _tabs = TabController(length: 2, vsync: this);
     _loadData();
-    _checkAndRequestOverlayPermission();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
-  }
-
-  Future<void> _checkAndRequestOverlayPermission() async {
-    try {
-      bool isGranted = await FlutterOverlayWindow.isPermissionGranted();
-      if (!isGranted) {
-        await FlutterOverlayWindow.requestPermission();
-      }
-    } catch (_) {}
   }
 
   @override
@@ -201,18 +183,26 @@ class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProvid
     }
   }
 
-  Future<void> _showNativeOverlay() async {
+  Future<bool> _checkOverlayPermission() async {
     try {
       bool isGranted = await FlutterOverlayWindow.isPermissionGranted();
       if (!isGranted) {
-        await FlutterOverlayWindow.requestPermission();
-        return;
+        bool? req = await FlutterOverlayWindow.requestPermission();
+        return req ?? false;
       }
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _showNativeOverlay() async {
+    try {
       if (await FlutterOverlayWindow.isActive()) return;
       await FlutterOverlayWindow.showOverlay(
         enableDrag: true,
-        overlayTitle: "Paulo Luna - Em Rota",
-        overlayContent: "Toque para abrir",
+        overlayTitle: "Jornada Ativa - Paulo Luna",
+        overlayContent: "Tempo: ${_formatTime(_seconds)}",
         flag: OverlayFlag.defaultFlag,
         alignment: OverlayAlignment.centerRight,
         visibility: NotificationVisibility.visibilityPublic,
@@ -250,7 +240,16 @@ class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProvid
   }
 
   void _start() async {
-    await _checkAndRequestOverlayPermission();
+    bool hasPerm = await _checkOverlayPermission();
+    if (!hasPerm && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Ative a opção "Aparecer sobre outros apps" para o botão flutuante funcionar!'),
+          duration: Duration(seconds: 4),
+        ),
+      );
+    }
+
     _timer = Timer.periodic(const Duration(seconds: 1), (t) {
       setState(() => _seconds++);
     });
@@ -396,7 +395,6 @@ class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProvid
                       initialDate: selectedDate,
                       firstDate: DateTime(2020),
                       lastDate: DateTime.now(),
-                      locale: const Locale('pt', 'BR'),
                     );
                     if (pickedDate != null) {
                       final pickedTime = await showTimePicker(
@@ -533,15 +531,20 @@ class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProvid
     );
   }
 
-  // Seletor de Período estilo BottomSheet totalmente traduzido
+  // Calendário Customizado com Visual idêntico ao Print e 100% em Português
   void _openDateFilterBottomSheet() {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      backgroundColor: widget.isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (ctx) {
+        DateTime displayedMonth = DateTime(_selectedRange.start.year, _selectedRange.start.month, 1);
+        DateTime? tempStart = _selectedRange.start;
+        DateTime? tempEnd = _selectedRange.end;
+
         return StatefulBuilder(
           builder: (context, setSheetState) {
             final now = DateTime.now();
@@ -557,21 +560,24 @@ class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProvid
               Navigator.pop(ctx);
             }
 
+            int daysInMonth = DateTime(displayedMonth.year, displayedMonth.month + 1, 0).day;
+            int firstWeekday = DateTime(displayedMonth.year, displayedMonth.month, 1).weekday % 7; // Dom = 0
+
             return Padding(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 30),
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Container(
                     width: 40,
                     height: 4,
-                    decoration: BoxDecoration(color: Colors.grey[600], borderRadius: BorderRadius.circular(10)),
+                    decoration: BoxDecoration(color: Colors.grey[500], borderRadius: BorderRadius.circular(10)),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 14),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text('Selecionar período', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                      const Text('Selecionar período', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                       IconButton(
                         icon: const Icon(Icons.close),
                         onPressed: () => Navigator.pop(ctx),
@@ -579,6 +585,7 @@ class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProvid
                     ],
                   ),
                   const SizedBox(height: 12),
+                  // Botões de Atalhos rápidos
                   SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
                     child: Row(
@@ -604,51 +611,124 @@ class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProvid
                       ],
                     ),
                   ),
-                  const SizedBox(height: 20),
-                  const Divider(),
-                  const SizedBox(height: 10),
-                  ListTile(
-                    leading: const Icon(Icons.date_range, color: Color(0xFF00C853)),
-                    title: const Text('Escolher Intervalo no Calendário'),
-                    subtitle: Text(
-                      '${_selectedRange.start.day} de ${_mesesAbbr[_selectedRange.start.month]} até ${_selectedRange.end.day} de ${_mesesAbbr[_selectedRange.end.month]} de ${_selectedRange.end.year}',
-                    ),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () async {
-                      final picked = await showDateRangePicker(
-                        context: context,
-                        initialDateRange: _selectedRange,
-                        firstDate: DateTime(2020),
-                        lastDate: DateTime.now(),
-                        locale: const Locale('pt', 'BR'),
-                        saveText: 'APLICAR',
-                        helpText: 'SELECIONE O INTERVALO',
-                        fieldStartLabelText: 'Data de início',
-                        fieldEndLabelText: 'Data de término',
-                        builder: (context, child) {
-                          return Theme(
-                            data: Theme.of(context).copyWith(
-                              colorScheme: Theme.of(context).colorScheme.copyWith(
-                                    primary: const Color(0xFF00C853),
-                                  ),
-                            ),
-                            child: child!,
-                          );
+                  const SizedBox(height: 16),
+                  // Cabeçalho de Navegação de Mês
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.chevron_left),
+                        onPressed: () {
+                          setSheetState(() {
+                            displayedMonth = DateTime(displayedMonth.year, displayedMonth.month - 1, 1);
+                          });
                         },
+                      ),
+                      Text(
+                        '${_meses[displayedMonth.month]} ${displayedMonth.year}',
+                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.chevron_right),
+                        onPressed: () {
+                          setSheetState(() {
+                            displayedMonth = DateTime(displayedMonth.year, displayedMonth.month + 1, 1);
+                          });
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  // Dias da Semana em Português (D S T Q Q S S)
+                  const Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    children: [
+                      Text('D', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
+                      Text('S', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
+                      Text('T', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
+                      Text('Q', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
+                      Text('Q', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
+                      Text('S', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
+                      Text('S', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  // Grid dos dias
+                  GridView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 7,
+                      mainAxisSpacing: 4,
+                      crossAxisSpacing: 4,
+                    ),
+                    itemCount: firstWeekday + daysInMonth,
+                    itemBuilder: (context, index) {
+                      if (index < firstWeekday) return const SizedBox.shrink();
+                      final dayNumber = index - firstWeekday + 1;
+                      final dayDate = DateTime(displayedMonth.year, displayedMonth.month, dayNumber);
+
+                      bool isSelectedStart = tempStart != null &&
+                          dayDate.year == tempStart!.year &&
+                          dayDate.month == tempStart!.month &&
+                          dayDate.day == tempStart!.day;
+
+                      bool isSelectedEnd = tempEnd != null &&
+                          dayDate.year == tempEnd!.year &&
+                          dayDate.month == tempEnd!.month &&
+                          dayDate.day == tempEnd!.day;
+
+                      bool isInRange = tempStart != null &&
+                          tempEnd != null &&
+                          dayDate.isAfter(tempStart!) &&
+                          dayDate.isBefore(tempEnd!);
+
+                      return GestureDetector(
+                        onTap: () {
+                          setSheetState(() {
+                            if (tempStart == null || (tempStart != null && tempEnd != null)) {
+                              tempStart = dayDate;
+                              tempEnd = null;
+                            } else if (tempStart != null && tempEnd == null) {
+                              if (dayDate.isBefore(tempStart!)) {
+                                tempStart = dayDate;
+                              } else {
+                                tempEnd = dayDate;
+                              }
+                            }
+                          });
+                        },
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: (isSelectedStart || isSelectedEnd)
+                                ? const Color(0xFF00C853)
+                                : isInRange
+                                    ? const Color(0xFF00C853).withOpacity(0.25)
+                                    : Colors.transparent,
+                            borderRadius: BorderRadius.circular((isSelectedStart || isSelectedEnd) ? 20 : 6),
+                          ),
+                          alignment: Alignment.center,
+                          child: Text(
+                            '$dayNumber',
+                            style: TextStyle(
+                              color: (isSelectedStart || isSelectedEnd) ? Colors.white : null,
+                              fontWeight: (isSelectedStart || isSelectedEnd) ? FontWeight.bold : FontWeight.normal,
+                            ),
+                          ),
+                        ),
                       );
-                      if (picked != null) {
-                        setState(() {
-                          _filterLabel = '${picked.start.day}/${_mesesAbbr[picked.start.month]} - ${picked.end.day}/${_mesesAbbr[picked.end.month]}';
-                          _selectedRange = DateTimeRange(
-                            start: DateTime(picked.start.year, picked.start.month, picked.start.day),
-                            end: DateTime(picked.end.year, picked.end.month, picked.end.day, 23, 59, 59),
-                          );
-                        });
-                        Navigator.pop(ctx);
-                      }
                     },
                   ),
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 16),
+                  Text(
+                    tempStart != null && tempEnd != null
+                        ? '${tempStart!.day} ${_mesesAbbr[tempStart!.month]} – ${tempEnd!.day} ${_mesesAbbr[tempEnd!.month]}'
+                        : tempStart != null
+                            ? '${tempStart!.day} ${_mesesAbbr[tempStart!.month]} – ...'
+                            : 'Selecione as datas',
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.grey),
+                  ),
+                  const SizedBox(height: 12),
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton.icon(
@@ -658,7 +738,19 @@ class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProvid
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       ),
-                      onPressed: () => Navigator.pop(ctx),
+                      onPressed: () {
+                        if (tempStart != null) {
+                          final finalEnd = tempEnd ?? tempStart!;
+                          setState(() {
+                            _filterLabel = '${tempStart!.day}/${_mesesAbbr[tempStart!.month]} – ${finalEnd.day}/${_mesesAbbr[finalEnd.month]}';
+                            _selectedRange = DateTimeRange(
+                              start: DateTime(tempStart!.year, tempStart!.month, tempStart!.day),
+                              end: DateTime(finalEnd.year, finalEnd.month, finalEnd.day, 23, 59, 59),
+                            );
+                          });
+                        }
+                        Navigator.pop(ctx);
+                      },
                       icon: const Icon(Icons.check),
                       label: const Text('Aplicar período', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                     ),
@@ -730,48 +822,53 @@ class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProvid
             ],
           ),
 
-          // Balão com encaixe magnético nas laterais da tela
+          // BALÃO COM ENCAIXE MAGNÉTICO NAS BORDAS LATERAIS
           if (_running)
-            Positioned(
-              left: _pillOnRight ? null : 0,
-              right: _pillOnRight ? 0 : null,
+            AnimatedPositioned(
+              duration: _isDragging ? Duration.zero : const Duration(milliseconds: 250),
+              curve: Curves.easeOutCubic,
+              left: _pillX,
               top: _pillY,
               child: GestureDetector(
-                onVerticalDragUpdate: (details) {
+                onPanStart: (_) {
+                  setState(() => _isDragging = true);
+                },
+                onPanUpdate: (details) {
                   setState(() {
-                    _pillY = (_pillY + details.delta.dy).clamp(80.0, screenSize.height - 180.0);
+                    _pillX += details.delta.dx;
+                    _pillY += details.delta.dy;
+                    _pillY = _pillY.clamp(80.0, screenSize.height - 180.0);
                   });
                 },
-                onHorizontalDragEnd: (details) {
-                  if (details.primaryVelocity != null) {
-                    if (details.primaryVelocity! > 200) {
-                      setState(() => _pillOnRight = true);
-                    } else if (details.primaryVelocity! < -200) {
-                      setState(() => _pillOnRight = false);
+                onPanEnd: (details) {
+                  setState(() {
+                    _isDragging = false;
+                    // Efeito Magnético: Se estiver na metade esquerda, gruda na esquerda. Senão, na direita.
+                    if (_pillX < (screenSize.width / 2) - 60) {
+                      _pillX = 10.0;
+                    } else {
+                      _pillX = screenSize.width - 150.0;
                     }
-                  }
+                  });
                 },
                 onTap: () => _tabs.animateTo(0),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.90),
-                    borderRadius: BorderRadius.only(
-                      topLeft: Radius.circular(_pillOnRight ? 24 : 0),
-                      bottomLeft: Radius.circular(_pillOnRight ? 24 : 0),
-                      topRight: Radius.circular(_pillOnRight ? 0 : 24),
-                      bottomRight: Radius.circular(_pillOnRight ? 0 : 24),
-                    ),
+                    color: Colors.black.withOpacity(0.92),
+                    borderRadius: BorderRadius.circular(24),
                     border: Border.all(color: const Color(0xFF00E676), width: 2),
-                    boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 10, offset: Offset(0, 4))],
+                    boxShadow: const [
+                      BoxShadow(color: Colors.black54, blurRadius: 8, offset: Offset(0, 3)),
+                    ],
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.fiber_manual_record, color: Color(0xFF00E676), size: 12),
+                      const Icon(Icons.fiber_manual_record, color: Color(0xFF00E676), size: 10),
                       const SizedBox(width: 6),
                       Text(
-                        'EM ROTA: ${_formatTime(_seconds)}',
+                        _formatTime(_seconds),
                         style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
                       ),
                     ],
@@ -1000,7 +1097,6 @@ class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProvid
   }
 }
 
-// Botão Flutuante Nativo para sobrepor outros apps (Uber/99/Waze)
 class OverlayWidget extends StatelessWidget {
   const OverlayWidget({super.key});
 
@@ -1023,11 +1119,11 @@ class OverlayWidget extends StatelessWidget {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.timer, color: Color(0xFF00E676), size: 28),
+                Icon(Icons.timer, color: Color(0xFF00E676), size: 26),
                 SizedBox(height: 2),
                 Text(
                   "EM ROTA",
-                  style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
+                  style: TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold),
                 ),
               ],
             ),
@@ -1037,4 +1133,3 @@ class OverlayWidget extends StatelessWidget {
     );
   }
 }
-
