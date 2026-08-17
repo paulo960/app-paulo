@@ -28,7 +28,11 @@ jobs:
       - name: Criar projeto Flutter base
         run: |
           flutter create --org com.pauloluna --project-name paulo_luna .
-          flutter pub add shared_preferences
+          flutter pub add shared_preferences flutter_overlay_window
+
+      - name: Configurar Permissão Overlay no AndroidManifest
+        run: |
+          sed -i '/<application/i <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>\n<uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>' android/app/src/main/AndroidManifest.xml
 
       - name: Compilar APK Release
         run: flutter build apk --release
