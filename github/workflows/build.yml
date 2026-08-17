@@ -1,0 +1,40 @@
+name: Gerar APK Paulo Luna
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Configurar Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.22.x'
+          channel: 'stable'
+
+      - name: Criar projeto Flutter base
+        run: |
+          flutter create --org com.pauloluna --project-name paulo_luna .
+          flutter pub add shared_preferences
+
+      - name: Compilar APK Release
+        run: flutter build apk --release
+
+      - name: Disponibilizar APK para Download
+        uses: actions/upload-artifact@v4
+        with:
+          name: PauloLuna-App
+          path: build/app/outputs/flutter-apk/app-release.apk
