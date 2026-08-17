@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -38,9 +39,9 @@ class Shift {
         id: map['id'],
         date: DateTime.parse(map['date']),
         duration: map['duration'],
-        km: map['km'],
-        fuel: map['fuel'],
-        gross: map['gross'],
+        km: (map['km'] as num).toDouble(),
+        fuel: (map['fuel'] as num).toDouble(),
+        gross: (map['gross'] as num).toDouble(),
       );
 }
 
@@ -148,6 +149,7 @@ class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProvid
     if (shiftsJson != null) {
       final List decoded = jsonDecode(shiftsJson);
       setState(() {
+        _shifts.clear();
         _shifts.addAll(decoded.map((e) => Shift.fromMap(e)).toList());
       });
     }
