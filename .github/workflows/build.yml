@@ -24,20 +24,20 @@ jobs:
           flutter-version: '3.22.3'
           channel: 'stable'
 
-      - name: Gerar arquivos nativos limpos do Android
+      - name: Gerar estrutura original compativel
         run: |
           rm -rf android
-          flutter create . --platforms=android --org com.example --project-name time_app
+          flutter create . --platforms=android --org com.example
 
-      - name: Configurar nome e permissões no AndroidManifest
+      - name: Ajustar nome na tela inicial e permissoes
         run: |
           sed -i '/<application/i \    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>' android/app/src/main/AndroidManifest.xml
           sed -i 's/android:label=".*"/android:label="Time App"/' android/app/src/main/AndroidManifest.xml
 
-      - name: Instalar dependências
+      - name: Instalar dependencias
         run: flutter pub get
 
-      - name: Compilar APK Release
+      - name: Compilar APK
         run: flutter build apk --release
 
       - name: Disponibilizar APK para Download
