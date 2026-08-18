@@ -24,10 +24,10 @@ jobs:
           flutter-version: '3.22.3'
           channel: 'stable'
 
-      - name: Gerar estrutura original compativel
+      - name: Gerar estrutura nativa compativel
         run: |
           rm -rf android
-          flutter create . --platforms=android --org com.example
+          flutter create . --platforms=android --org com.example --project-name time_app
 
       - name: Ajustar nome na tela inicial e permissoes
         run: |
