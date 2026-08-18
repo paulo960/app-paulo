@@ -1,17 +1,24 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
-void main() => runApp(const DriverApp());
+final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
+    FlutterLocalNotificationsPlugin();
 
-@pragma("vm:entry-point")
-void overlayMain() {
-  runApp(const MaterialApp(
-    debugShowCheckedModeBanner: false,
-    home: OverlayWidget(),
-  ));
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  const AndroidInitializationSettings initializationSettingsAndroid =
+      AndroidInitializationSettings('@mipmap/ic_launcher');
+
+  const InitializationSettings initializationSettings =
+      InitializationSettings(android: initializationSettingsAndroid);
+
+  await flutterLocalNotificationsPlugin.initialize(initializationSettings);
+
+  runApp(const DriverApp());
 }
 
 class Shift {
@@ -32,8 +39,6 @@ class Shift {
   });
 
   double get net => gross - fuel;
-  double get costPerKm => km > 0 ? fuel / km : 0.0;
-  double get earningsPerHour => duration > 0 ? (net / (duration / 3600)) : 0.0;
 
   Map<String, dynamic> toMap() => {
         'id': id,
@@ -73,7 +78,7 @@ class _DriverAppState extends State<DriverApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Paulo Luna',
+      title: 'Time App',
       debugShowCheckedModeBanner: false,
       themeMode: _themeMode,
       theme: ThemeData(
@@ -130,17 +135,12 @@ class DriverHomePage extends StatefulWidget {
   State<DriverHomePage> createState() => _DriverHomePageState();
 }
 
-class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProviderStateMixin, WidgetsBindingObserver {
+class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProviderStateMixin {
   late TabController _tabs;
   Timer? _timer;
   int _seconds = 0;
   bool _running = false;
   List<Shift> _shifts = [];
-
-  // Posição magnética fluida do balão
-  double _pillX = 200.0;
-  double _pillY = 150.0;
-  bool _isDragging = false;
 
   DateTimeRange _selectedRange = DateTimeRange(
     start: DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day),
@@ -161,76 +161,94 @@ class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProvid
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
     _tabs = TabController(length: 2, vsync: this);
-    _loadData();
+    _requestNotificationPermissions();
+    _loadState();
   }
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
+    _timer?.cancel();
     super.dispose();
   }
 
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (_running) {
-      if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
-        _showNativeOverlay();
-      } else if (state == AppLifecycleState.resumed) {
-        _closeNativeOverlay();
-      }
-    }
+  Future<void> _requestNotificationPermissions() async {
+    final AndroidFlutterLocalNotificationsPlugin? androidImplementation =
+        flutterLocalNotificationsPlugin.resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>();
+    await androidImplementation?.requestNotificationsPermission();
   }
 
-  Future<bool> _checkOverlayPermission() async {
-    try {
-      bool isGranted = await FlutterOverlayWindow.isPermissionGranted();
-      if (!isGranted) {
-        bool? req = await FlutterOverlayWindow.requestPermission();
-        return req ?? false;
-      }
-      return true;
-    } catch (_) {
-      return false;
-    }
+  Future<void> _showNotification(String timeStr) async {
+    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+      'shift_tracker_channel',
+      'Jornada em Andamento',
+      channelDescription: 'Exibe o tempo trabalhado em rota',
+      importance: Importance.low,
+      priority: Priority.low,
+      ongoing: true,
+      autoCancel: false,
+      showWhen: false,
+      color: Color(0xFF00E676),
+    );
+
+    const NotificationDetails platformDetails = NotificationDetails(android: androidDetails);
+    await flutterLocalNotificationsPlugin.show(
+      888,
+      'Time App - Em Rota',
+      'Tempo trabalhado: $timeStr',
+      platformDetails,
+    );
   }
 
-  Future<void> _showNativeOverlay() async {
-    try {
-      if (await FlutterOverlayWindow.isActive()) return;
-      await FlutterOverlayWindow.showOverlay(
-        enableDrag: true,
-        overlayTitle: "Jornada Ativa - Paulo Luna",
-        overlayContent: "Tempo: ${_formatTime(_seconds)}",
-        flag: OverlayFlag.defaultFlag,
-        alignment: OverlayAlignment.centerRight,
-        visibility: NotificationVisibility.visibilityPublic,
-        positionGravity: PositionGravity.auto,
-        height: 180,
-        width: 180,
-      );
-    } catch (_) {}
+  Future<void> _cancelNotification() async {
+    await flutterLocalNotificationsPlugin.cancel(888);
   }
 
-  Future<void> _closeNativeOverlay() async {
-    try {
-      if (await FlutterOverlayWindow.isActive()) {
-        await FlutterOverlayWindow.closeOverlay();
-      }
-    } catch (_) {}
-  }
-
-  Future<void> _loadData() async {
+  Future<void> _loadState() async {
     final prefs = await SharedPreferences.getInstance();
+
+    // Recupera Histórico
     final String? shiftsJson = prefs.getString('shifts_data');
     if (shiftsJson != null) {
       final List decoded = jsonDecode(shiftsJson);
       setState(() {
-        _shifts.clear();
-        _shifts.addAll(decoded.map((e) => Shift.fromMap(e)).toList());
+        _shifts = decoded.map((e) => Shift.fromMap(e)).toList();
       });
     }
+
+    // Recupera Jornada Ativa/Pausada
+    final savedSeconds = prefs.getInt('active_shift_seconds') ?? 0;
+    final isRunning = prefs.getBool('active_shift_running') ?? false;
+    final lastTime = prefs.getInt('active_shift_timestamp') ?? 0;
+
+    if (isRunning && lastTime > 0) {
+      final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      final elapsed = nowSec - lastTime;
+      setState(() {
+        _seconds = savedSeconds + elapsed;
+      });
+      _start();
+    } else if (savedSeconds > 0) {
+      setState(() {
+        _seconds = savedSeconds;
+        _running = false;
+      });
+    }
+  }
+
+  Future<void> _persistActiveState() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('active_shift_seconds', _seconds);
+    await prefs.setBool('active_shift_running', _running);
+    await prefs.setInt('active_shift_timestamp', DateTime.now().millisecondsSinceEpoch ~/ 1000);
+  }
+
+  Future<void> _clearActiveState() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('active_shift_seconds');
+    await prefs.remove('active_shift_running');
+    await prefs.remove('active_shift_timestamp');
   }
 
   Future<void> _saveData() async {
@@ -239,27 +257,26 @@ class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProvid
     await prefs.setString('shifts_data', encoded);
   }
 
-  void _start() async {
-    bool hasPerm = await _checkOverlayPermission();
-    if (!hasPerm && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Ative a opção "Aparecer sobre outros apps" para o botão flutuante funcionar!'),
-          duration: Duration(seconds: 4),
-        ),
-      );
-    }
+  void _start() {
+    _timer?.cancel();
+    setState(() => _running = true);
+    _showNotification(_formatTime(_seconds));
+    _persistActiveState();
 
     _timer = Timer.periodic(const Duration(seconds: 1), (t) {
       setState(() => _seconds++);
+      _showNotification(_formatTime(_seconds));
+      if (_seconds % 10 == 0) {
+        _persistActiveState();
+      }
     });
-    setState(() => _running = true);
   }
 
   void _pause() {
     _timer?.cancel();
     setState(() => _running = false);
-    _closeNativeOverlay();
+    _cancelNotification();
+    _persistActiveState();
   }
 
   void _reset() {
@@ -268,7 +285,8 @@ class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProvid
       _seconds = 0;
       _running = false;
     });
-    _closeNativeOverlay();
+    _cancelNotification();
+    _clearActiveState();
   }
 
   String _formatTime(int s) {
@@ -302,8 +320,10 @@ class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProvid
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text('Tempo trabalhado: ${_formatTime(_seconds)}',
-                  style: TextStyle(color: Theme.of(context).primaryColor, fontWeight: FontWeight.bold)),
+              Text(
+                'Tempo trabalhado: ${_formatTime(_seconds)}',
+                style: TextStyle(color: Theme.of(context).primaryColor, fontWeight: FontWeight.bold),
+              ),
               const SizedBox(height: 14),
               TextField(
                 controller: kmCtrl,
@@ -531,7 +551,6 @@ class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProvid
     );
   }
 
-  // Calendário Customizado com Visual idêntico ao Print e 100% em Português
   void _openDateFilterBottomSheet() {
     showModalBottomSheet(
       context: context,
@@ -561,7 +580,7 @@ class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProvid
             }
 
             int daysInMonth = DateTime(displayedMonth.year, displayedMonth.month + 1, 0).day;
-            int firstWeekday = DateTime(displayedMonth.year, displayedMonth.month, 1).weekday % 7; // Dom = 0
+            int firstWeekday = DateTime(displayedMonth.year, displayedMonth.month, 1).weekday % 7;
 
             return Padding(
               padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
@@ -585,7 +604,6 @@ class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProvid
                     ],
                   ),
                   const SizedBox(height: 12),
-                  // Botões de Atalhos rápidos
                   SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
                     child: Row(
@@ -612,7 +630,6 @@ class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProvid
                     ),
                   ),
                   const SizedBox(height: 16),
-                  // Cabeçalho de Navegação de Mês
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -639,7 +656,6 @@ class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProvid
                     ],
                   ),
                   const SizedBox(height: 8),
-                  // Dias da Semana em Português (D S T Q Q S S)
                   const Row(
                     mainAxisAlignment: MainAxisAlignment.spaceAround,
                     children: [
@@ -653,7 +669,6 @@ class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProvid
                     ],
                   ),
                   const SizedBox(height: 8),
-                  // Grid dos dias
                   GridView.builder(
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
@@ -725,7 +740,7 @@ class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProvid
                         ? '${tempStart!.day} ${_mesesAbbr[tempStart!.month]} – ${tempEnd!.day} ${_mesesAbbr[tempEnd!.month]}'
                         : tempStart != null
                             ? '${tempStart!.day} ${_mesesAbbr[tempStart!.month]} – ...'
-                            : 'Selecione as datas',
+                            : 'Toque para selecionar',
                     style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.grey),
                   ),
                   const SizedBox(height: 12),
@@ -785,11 +800,9 @@ class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProvid
 
   @override
   Widget build(BuildContext context) {
-    final screenSize = MediaQuery.of(context).size;
-
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Paulo Luna', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text('Time App', style: TextStyle(fontWeight: FontWeight.bold)),
         centerTitle: false,
         actions: [
           IconButton(
@@ -812,70 +825,11 @@ class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProvid
           ],
         ),
       ),
-      body: Stack(
+      body: TabBarView(
+        controller: _tabs,
         children: [
-          TabBarView(
-            controller: _tabs,
-            children: [
-              _buildTimerTab(),
-              _buildHistoryTab(),
-            ],
-          ),
-
-          // BALÃO COM ENCAIXE MAGNÉTICO NAS BORDAS LATERAIS
-          if (_running)
-            AnimatedPositioned(
-              duration: _isDragging ? Duration.zero : const Duration(milliseconds: 250),
-              curve: Curves.easeOutCubic,
-              left: _pillX,
-              top: _pillY,
-              child: GestureDetector(
-                onPanStart: (_) {
-                  setState(() => _isDragging = true);
-                },
-                onPanUpdate: (details) {
-                  setState(() {
-                    _pillX += details.delta.dx;
-                    _pillY += details.delta.dy;
-                    _pillY = _pillY.clamp(80.0, screenSize.height - 180.0);
-                  });
-                },
-                onPanEnd: (details) {
-                  setState(() {
-                    _isDragging = false;
-                    // Efeito Magnético: Se estiver na metade esquerda, gruda na esquerda. Senão, na direita.
-                    if (_pillX < (screenSize.width / 2) - 60) {
-                      _pillX = 10.0;
-                    } else {
-                      _pillX = screenSize.width - 150.0;
-                    }
-                  });
-                },
-                onTap: () => _tabs.animateTo(0),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.92),
-                    borderRadius: BorderRadius.circular(24),
-                    border: Border.all(color: const Color(0xFF00E676), width: 2),
-                    boxShadow: const [
-                      BoxShadow(color: Colors.black54, blurRadius: 8, offset: Offset(0, 3)),
-                    ],
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.fiber_manual_record, color: Color(0xFF00E676), size: 10),
-                      const SizedBox(width: 6),
-                      Text(
-                        _formatTime(_seconds),
-                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
+          _buildTimerTab(),
+          _buildHistoryTab(),
         ],
       ),
       floatingActionButton: _tabs.index == 1
@@ -1093,43 +1047,6 @@ class _DriverHomePageState extends State<DriverHomePage> with SingleTickerProvid
           ],
         )
       ],
-    );
-  }
-}
-
-class OverlayWidget extends StatelessWidget {
-  const OverlayWidget({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: GestureDetector(
-        onTap: () => FlutterOverlayWindow.shareData("open_app"),
-        child: Container(
-          decoration: BoxDecoration(
-            color: Colors.black.withOpacity(0.92),
-            shape: BoxShape.circle,
-            border: Border.all(color: const Color(0xFF00E676), width: 3),
-            boxShadow: const [
-              BoxShadow(color: Colors.black87, blurRadius: 10, offset: Offset(0, 3)),
-            ],
-          ),
-          child: const Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.timer, color: Color(0xFF00E676), size: 26),
-                SizedBox(height: 2),
-                Text(
-                  "EM ROTA",
-                  style: TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
     );
   }
 }
