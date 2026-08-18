@@ -24,8 +24,15 @@ jobs:
           flutter-version: '3.22.3'
           channel: 'stable'
 
-      - name: Gerar estrutura nativa do Android
-        run: flutter create . --platforms=android --org com.example
+      - name: Gerar arquivos nativos limpos do Android
+        run: |
+          rm -rf android
+          flutter create . --platforms=android --org com.example --project-name time_app
+
+      - name: Configurar nome e permissões no AndroidManifest
+        run: |
+          sed -i '/<application/i \    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>' android/app/src/main/AndroidManifest.xml
+          sed -i 's/android:label=".*"/android:label="Time App"/' android/app/src/main/AndroidManifest.xml
 
       - name: Instalar dependências
         run: flutter pub get
