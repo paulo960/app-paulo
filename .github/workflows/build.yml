@@ -24,10 +24,15 @@ jobs:
           flutter-version: '3.22.3'
           channel: 'stable'
 
+      - name: Gerar estrutura nativa Android
+        run: |
+          rm -rf android
+          flutter create . --platforms=android --org com.example --project-name app_paulo_luna
+
       - name: Instalar dependencias
         run: flutter pub get
 
-      - name: Compilar APK Padrao
+      - name: Compilar APK Debug
         run: flutter build apk --debug
 
       - name: Disponibilizar APK para Download
