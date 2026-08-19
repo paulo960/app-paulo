@@ -1,22 +1,24 @@
-name: Gerar APK Paulo Luna
+name: Publicar Time App Web
 
 on:
   push:
     branches: [ "main" ]
   workflow_dispatch:
 
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
-
-      - name: Configurar Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'zulu'
-          java-version: '17'
 
       - name: Configurar Flutter
         uses: subosito/flutter-action@v2
@@ -24,19 +26,29 @@ jobs:
           flutter-version: '3.22.3'
           channel: 'stable'
 
-      - name: Gerar estrutura nativa Android
+      - name: Gerar arquivos Web limpos
         run: |
-          rm -rf android
-          flutter create . --platforms=android --org com.example --project-name app_paulo_luna
+          rm -rf web
+          flutter create . --platforms=web --project-name app_paulo_luna
 
       - name: Instalar dependencias
         run: flutter pub get
 
-      - name: Compilar APK Debug
-        run: flutter build apk --debug
+      - name: Compilar versao Web
+        run: flutter build web --release --base-href "/app-paulo-luna/"
 
-      - name: Disponibilizar APK para Download
-        uses: actions/upload-artifact@v4
+      - name: Fazer Upload do Artefato
+        uses: actions/upload-pages-artifact@v3
         with:
-          name: TimeApp-Debug
-          path: build/app/outputs/flutter-apk/app-debug.apk
+          path: build/web
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Publicar no GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
