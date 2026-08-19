@@ -24,24 +24,14 @@ jobs:
           flutter-version: '3.22.3'
           channel: 'stable'
 
-      - name: Gerar estrutura nativa original
-        run: |
-          rm -rf android
-          flutter create . --platforms=android --org com.example --project-name app_paulo_luna
-
-      - name: Configurar permissoes e nome Time App
-        run: |
-          sed -i '/<application/i \    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>' android/app/src/main/AndroidManifest.xml
-          sed -i 's/android:label=".*"/android:label="Time App"/' android/app/src/main/AndroidManifest.xml
-
       - name: Instalar dependencias
         run: flutter pub get
 
-      - name: Compilar APK
-        run: flutter build apk --release
+      - name: Compilar APK Padrao
+        run: flutter build apk --debug
 
       - name: Disponibilizar APK para Download
         uses: actions/upload-artifact@v4
         with:
-          name: TimeApp-Release
-          path: build/app/outputs/flutter-apk/app-release.apk
+          name: TimeApp-Debug
+          path: build/app/outputs/flutter-apk/app-debug.apk
