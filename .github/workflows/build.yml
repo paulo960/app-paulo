@@ -49,20 +49,21 @@ jobs:
       - name: Instalar dependencias Flutter
         run: flutter pub get
 
-      - name: Compilar e Assinar APK com Chave Oficial
-        run: |
-          flutter build apk --release \
-            --extra-gen-snapshot-options=--save-obfuscation-map=obfuscation.map \
-            --dart-define=RELEASE_BUILD=true
+      - name: Compilar APK
+        run: flutter build apk --release
 
-          jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 \
-            -keystore upload-keystore.jks \
-            -storepass "PauloLunaApp2026" \
-            -keypass "PauloLunaApp2026" \
-            build/app/outputs/flutter-apk/app-release.apk upload
+      - name: Assinar APK Oficialmente (apksigner)
+        run: |
+          $ANDROID_SDK_ROOT/build-tools/34.0.0/apksigner sign \
+            --ks upload-keystore.jks \
+            --ks-pass pass:PauloLunaApp2026 \
+            --ks-key-alias upload \
+            --key-pass pass:PauloLunaApp2026 \
+            --out build/app/outputs/flutter-apk/app-release-signed.apk \
+            build/app/outputs/flutter-apk/app-release.apk
 
       - name: Disponibilizar APK para Download
         uses: actions/upload-artifact@v4
         with:
           name: TimeApp-Assinado-Release
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: build/app/outputs/flutter-apk/app-release-signed.apk
