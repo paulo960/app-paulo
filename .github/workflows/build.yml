@@ -24,54 +24,20 @@ jobs:
           flutter-version: '3.22.3'
           channel: 'stable'
 
-      - name: Gerar estrutura nativa limpa
+      - name: Gerar estrutura nativa original
         run: |
           rm -rf android
-          flutter create . --platforms=android --org com.example --project-name time_app
+          flutter create . --platforms=android --org com.example --project-name app_paulo_luna
 
-      - name: Configurar permissoes e nome
+      - name: Configurar permissoes e nome Time App
         run: |
           sed -i '/<application/i \    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>' android/app/src/main/AndroidManifest.xml
           sed -i 's/android:label=".*"/android:label="Time App"/' android/app/src/main/AndroidManifest.xml
 
-      - name: Gerar Chave de Assinatura Oficial (Keystore)
-        run: |
-          keytool -genkey -v -keystore android/app/key.jks -keyalg RSA -keysize 2048 -validity 10000 -alias timeapp -storepass android -keypass android -dname "CN=TimeApp, OU=App, O=PauloLuna, L=Goiania, ST=GO, C=BR"
-          cat << 'EOF' > android/key.properties
-          storePassword=android
-          keyPassword=android
-          keyAlias=timeapp
-          storeFile=key.jks
-          EOF
-
-      - name: Configurar Gradle para usar a Chave de Assinatura
-        run: |
-          cat << 'EOF' > update_build.py
-          with open('android/app/build.gradle', 'r') as f:
-              content = f.read()
-
-          signing_config = """
-              signingConfigs {
-                  release {
-                      storeFile file('key.jks')
-                      storePassword 'android'
-                      keyAlias 'timeapp'
-                      keyPassword 'android'
-                  }
-              }
-          """
-          content = content.replace('buildTypes {', signing_config + '\n    buildTypes {')
-          content = content.replace('signingConfig signingConfigs.debug', 'signingConfig signingConfigs.release')
-
-          with open('android/app/build.gradle', 'w') as f:
-              f.write(content)
-          EOF
-          python3 update_build.py
-
       - name: Instalar dependencias
         run: flutter pub get
 
-      - name: Compilar APK Assinado
+      - name: Compilar APK
         run: flutter build apk --release
 
       - name: Disponibilizar APK para Download
