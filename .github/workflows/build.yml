@@ -24,7 +24,7 @@ jobs:
           flutter-version: '3.22.3'
           channel: 'stable'
 
-      - name: Gerar estrutura nativa Android limpa
+      - name: Gerar estrutura nativa Android
         run: |
           rm -rf android
           flutter create . --platforms=android --org com.pauloluna --project-name app_paulo_luna
@@ -34,10 +34,10 @@ jobs:
           sed -i '/<application/i \    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>' android/app/src/main/AndroidManifest.xml
           sed -i 's/android:label=".*"/android:label="Time App"/' android/app/src/main/AndroidManifest.xml
 
-      - name: Gerar Keystore de Release Proprio
+      - name: Gerar Keystore de Release Oficial
         run: |
           keytool -genkeypair -v \
-            -keystore android/app/upload-keystore.jks \
+            -keystore upload-keystore.jks \
             -keyalg RSA \
             -keysize 2048 \
             -validity 10000 \
@@ -46,52 +46,20 @@ jobs:
             -keypass "PauloLunaApp2026" \
             -dname "CN=Paulo Luna, OU=Mobile, O=PauloLuna, L=Goiania, ST=GO, C=BR"
 
-          cat << 'EOF' > android/key.properties
-          storePassword=PauloLunaApp2026
-          keyPassword=PauloLunaApp2026
-          keyAlias=upload
-          storeFile=upload-keystore.jks
-          EOF
-
-      - name: Configurar build.gradle para Assinatura de Release Real
-        run: |
-          python3 -c "
-          import re
-
-          with open('android/app/build.gradle', 'r') as f:
-              gradle = f.read()
-
-          header = '''def keystoreProperties = new Properties()
-          def keystorePropertiesFile = rootProject.file('key.properties')
-          if (keystorePropertiesFile.exists()) {
-              keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
-          }
-          '''
-          gradle = header + gradle
-
-          signing_block = '''
-              signingConfigs {
-                  release {
-                      keyAlias keystoreProperties['keyAlias']
-                      keyPassword keystoreProperties['keyPassword']
-                      storeFile keystoreProperties['storeFile'] ? file(keystoreProperties['storeFile']) : null
-                      storePassword keystoreProperties['storePassword']
-                  }
-              }
-          '''
-
-          gradle = re.sub(r'android\s*\{', 'android {\n' + signing_block, gradle, count=1)
-          gradle = re.sub(r'signingConfig\s+signingConfigs\.debug', 'signingConfig signingConfigs.release', gradle)
-
-          with open('android/app/build.gradle', 'w') as f:
-              f.write(gradle)
-          "
-
       - name: Instalar dependencias Flutter
         run: flutter pub get
 
-      - name: Compilar APK Release Assinado
-        run: flutter build apk --release
+      - name: Compilar e Assinar APK com Chave Oficial
+        run: |
+          flutter build apk --release \
+            --extra-gen-snapshot-options=--save-obfuscation-map=obfuscation.map \
+            --dart-define=RELEASE_BUILD=true
+
+          jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 \
+            -keystore upload-keystore.jks \
+            -storepass "PauloLunaApp2026" \
+            -keypass "PauloLunaApp2026" \
+            build/app/outputs/flutter-apk/app-release.apk upload
 
       - name: Disponibilizar APK para Download
         uses: actions/upload-artifact@v4
